@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fortnite Clone - Battle Royale (WASM)</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#000; overflow:hidden; font-family:'Segoe UI',Arial; }
+    #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; color:#fff; }
+    .chr { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
+    .chr-h,.chr-v { position:absolute; background:rgba(255,255,255,0.85); box-shadow:0 0 6px #000; }
+    .chr-h { width:16px; height:2px; top:50%; left:50%; margin-left:-8px; margin-top:-1px; }
+    .chr-v { width:2px; height:16px; top:50%; left:50%; margin-left:-1px; margin-top:-8px; }
+    .chr-d { width:3px; height:3px; background:#f44; border-radius:50%; position:absolute; top:50%; left:50%; margin-left:-1.5px; margin-top:-1.5px; }
+    #btm-l { position:absolute; bottom:20px; left:20px; display:flex; flex-direction:column; gap:5px; }
+    .bp { display:flex; align-items:center; gap:8px; }
+    .bl { width:20px; height:20px; font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); border-radius:4px; }
+    .bo { width:180px; height:14px; background:rgba(0,0,0,0.6); border-radius:7px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.2); }
+    .bi { height:100%; border-radius:7px; transition:width 0.15s; }
+    .bi.hp { background:linear-gradient(180deg,#5f5,#1a1); }
+    .bi.sh { background:linear-gradient(180deg,#5af,#15a); }
+    .bn { position:absolute; width:100%; text-align:center; line-height:14px; font-size:10px; font-weight:bold; text-shadow:0 0 4px #000; }
+    #rt-p { position:absolute; bottom:20px; right:20px; text-align:right; background:rgba(0,0,0,0.55); padding:8px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.2); }
+    #wn { font-size:17px; font-weight:bold; }
+    #am { font-size:28px; font-weight:bold; color:#ffd; }
+    .rs { margin-top:6px; display:flex; gap:10px; font-size:13px; }
+    .ri { display:flex; align-items:center; gap:4px; }
+    .ric { width:16px; height:16px; border-radius:3px; display:inline-block; }
+    .ric.wd { background:linear-gradient(135deg,#8B6914,#C49A3C,#5C3D0E); border:1px solid #3d2200; }
+    .ric.st { background:linear-gradient(135deg,#7a7a7a,#a8a8a8,#4a4a4a); border:1px solid #333; }
+    .ric.mt { background:linear-gradient(135deg,#5a6a7a,#8a9aAA,#3a4a5a); border:1px solid #2a3a4a; }
+    #mmw { position:absolute; top:20px; right:20px; width:170px; height:170px; border-radius:50%; overflow:hidden; border:3px solid rgba(255,255,255,0.5); background:#1a1a2e; }
+    #mm { width:100%; height:100%; }
+    #msg { position:absolute; top:44%; left:50%; transform:translate(-50%,-50%); font-size:38px; font-weight:bold; text-align:center; opacity:0; transition:opacity 0.4s; text-shadow:0 0 15px #000; }
+    #bld-ind { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:36px; height:36px; border:2px dashed rgba(100,200,255,0.7); border-radius:4px; background:rgba(100,150,255,0.12); }
+    #ctrl { position:absolute; top:8px; left:50%; transform:translateX(-50%); font-size:10px; color:rgba(255,255,255,0.55); background:rgba(0,0,0,0.5); padding:4px 12px; border-radius:10px; }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div class="chr"><div class="chr-h"></div><div class="chr-v"></div><div class="chr-d"></div></div>
+  <div id="btm-l">
+    <div class="bp"><div class="bl" style="color:#5f5;">HP</div><div class="bo"><div class="bn" id="hpt">100</div><div class="bi hp" id="hpf" style="width:100%"></div></div></div>
+    <div class="bp"><div class="bl" style="color:#5af;">SH</div><div class="bo"><div class="bn" id="sht">100</div><div class="bi sh" id="shf" style="width:100%"></div></div></div>
+  </div>
+  <div id="rt-p">
+    <div id="wn">Pickaxe</div><div id="am">30</div>
+    <div class="rs">
+      <div class="ri"><span class="ric wd"></span><span id="wd">200</span></div>
+      <div class="ri"><span class="ric st"></span><span id="sn">150</span></div>
+      <div class="ri"><span class="ric mt"></span><span id="ml">100</span></div>
+    </div>
+  </div>
+  <div id="mmw"><canvas id="mm" width="170" height="170"></canvas></div>
+  <div id="msg"></div>
+  <div id="bld-ind"></div>
+  <div id="ctrl">WASD Move | Mouse Look | LMB Shoot | RMB Build | Q Build Mode | 1/2/3 Piece | R Switch Weapon</div>
+</div>
+
+<script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+
+  // ===== Load WASM =====
+  const response = await fetch('game.wasm');
+  const wasmModule = await WebAssembly.instantiateStreaming(response, {});
+  const wasm = wasmModule.instance.exports;
+
+  // ===== Three.js Setup =====
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.Fog(0x87CEEB, 100, 400);
+
+  const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.5, 500);
+  camera.position.set(0, 200, 50);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // Lights
+  const ambient = new THREE.AmbientLight(0x405070);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
+  sun.position.set(100, 200, 60);
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = 1024;
+  sun.shadow.mapSize.height = 1024;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 500;
+  sun.shadow.camera.left = -150;
+  sun.shadow.camera.right = 150;
+  sun.shadow.camera.top = 150;
+  sun.shadow.camera.bottom = -150;
+  scene.add(sun);
+
+  // Ground
+  const groundGeo = new THREE.PlaneGeometry(300, 300);
+  const groundMat = new THREE.MeshLambertian({ color: 0x3a6b1e });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -0.1;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Grid lines for reference
+  const gridHelper = new THREE.GridHelper(300, 60, 0x335522, 0x224418);
