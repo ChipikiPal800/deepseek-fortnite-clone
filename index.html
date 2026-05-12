@@ -1,457 +1,191 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fortnite Clone - Battle Royale (WASM)</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#000; overflow:hidden; font-family:'Segoe UI',Arial; }
-    #ui { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; color:#fff; }
-    .chr { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
-    .chr-h,.chr-v { position:absolute; background:rgba(255,255,255,0.85); box-shadow:0 0 6px #000; }
-    .chr-h { width:16px; height:2px; top:50%; left:50%; margin-left:-8px; margin-top:-1px; }
-    .chr-v { width:2px; height:16px; top:50%; left:50%; margin-left:-1px; margin-top:-8px; }
-    .chr-d { width:3px; height:3px; background:#f44; border-radius:50%; position:absolute; top:50%; left:50%; margin-left:-1.5px; margin-top:-1.5px; }
-    #btm-l { position:absolute; bottom:20px; left:20px; display:flex; flex-direction:column; gap:5px; }
-    .bp { display:flex; align-items:center; gap:8px; }
-    .bl { width:20px; height:20px; font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); border-radius:4px; }
-    .bo { width:180px; height:14px; background:rgba(0,0,0,0.6); border-radius:7px; overflow:hidden; position:relative; border:1px solid rgba(255,255,255,0.2); }
-    .bi { height:100%; border-radius:7px; transition:width 0.15s; }
-    .bi.hp { background:linear-gradient(180deg,#5f5,#1a1); }
-    .bi.sh { background:linear-gradient(180deg,#5af,#15a); }
-    .bn { position:absolute; width:100%; text-align:center; line-height:14px; font-size:10px; font-weight:bold; text-shadow:0 0 4px #000; }
-    #rt-p { position:absolute; bottom:20px; right:20px; text-align:right; background:rgba(0,0,0,0.55); padding:8px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.2); }
-    #wn { font-size:17px; font-weight:bold; }
-    #am { font-size:28px; font-weight:bold; color:#ffd; }
-    .rs { margin-top:6px; display:flex; gap:10px; font-size:13px; }
-    .ri { display:flex; align-items:center; gap:4px; }
-    .ric { width:16px; height:16px; border-radius:3px; display:inline-block; }
-    .ric.wd { background:linear-gradient(135deg,#8B6914,#C49A3C,#5C3D0E); border:1px solid #3d2200; }
-    .ric.st { background:linear-gradient(135deg,#7a7a7a,#a8a8a8,#4a4a4a); border:1px solid #333; }
-    .ric.mt { background:linear-gradient(135deg,#5a6a7a,#8a9aAA,#3a4a5a); border:1px solid #2a3a4a; }
-    #mmw { position:absolute; top:20px; right:20px; width:170px; height:170px; border-radius:50%; overflow:hidden; border:3px solid rgba(255,255,255,0.5); background:#1a1a2e; }
-    #mm { width:100%; height:100%; }
-    #msg { position:absolute; top:44%; left:50%; transform:translate(-50%,-50%); font-size:38px; font-weight:bold; text-align:center; opacity:0; transition:opacity 0.4s; text-shadow:0 0 15px #000; }
-    #bld-ind { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:36px; height:36px; border:2px dashed rgba(100,200,255,0.7); border-radius:4px; background:rgba(100,150,255,0.12); }
-    #ctrl { position:absolute; top:8px; left:50%; transform:translateX(-50%); font-size:10px; color:rgba(255,255,255,0.55); background:rgba(0,0,0,0.5); padding:4px 12px; border-radius:10px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battle Royale</title>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,800;1,700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{
+            --gold:#f5c518;--blue:#1a9fff;--red:#ff3a3a;--green:#3aff80;
+            --storm:#2244ff;--dark:#0a0e1a;--wood:#c8a068;--stone:#aaa;--metal:#8ab0d0;
+        }
+        html,body{width:100%;height:100%;overflow:hidden;background:#000;
+            font-family:'Barlow Condensed',sans-serif;color:#fff;user-select:none;-webkit-user-select:none}
+        #game-canvas{display:none;position:absolute;inset:0;width:100vw;height:100vh;cursor:crosshair}
+        /* ---------- LOBBY ---------- */
+        #lobby{
+            position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+            justify-content:center;z-index:1000;background:linear-gradient(160deg,#050a14,#0d2040,#081a0a)
+        }
+        #lobby-canvas{width:260px;height:340px;border-radius:20px;box-shadow:0 0 40px rgba(245,197,24,0.4);margin-bottom:20px}
+        .lobby-title{font-size:42px;font-weight:800;letter-spacing:4px;text-transform:uppercase;
+            background:linear-gradient(180deg,#fff 0%,var(--gold) 55%,#d48a00 100%);
+            -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+        .lobby-sub{font-size:14px;color:rgba(255,255,255,0.5);letter-spacing:6px;margin-bottom:28px}
+        #name-input{
+            background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.25);color:#fff;
+            font-family:inherit;font-size:20px;font-weight:600;letter-spacing:2px;text-transform:uppercase;
+            padding:12px 20px;width:260px;text-align:center;margin-bottom:20px;
+            clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%);outline:none
+        }
+        #name-input:focus{border-color:var(--gold)}
+        #play-btn{
+            background:linear-gradient(180deg,#f5c518 0%,#c48800 100%);
+            color:#000;font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:800;
+            letter-spacing:5px;text-transform:uppercase;border:none;cursor:pointer;padding:14px 60px;
+            clip-path:polygon(10px 0%,100% 0%,calc(100% - 10px) 100%,0% 100%);
+            transition:transform .1s,filter .1s
+        }
+        #play-btn:hover{transform:scale(1.04);filter:brightness(1.1)}
+        #play-btn:active{transform:scale(0.98)}
+        /* ---------- HUD (hidden until game) ---------- */
+        #hud{position:fixed;inset:0;pointer-events:none;z-index:100;display:none}
+        /* Crosshair */
+        #crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:0;height:0}
+        .ch-arm{position:absolute;background:rgba(255,255,255,0.9);border-radius:1px}
+        .ch-top{width:2px;height:8px;top:-14px;left:-1px}
+        .ch-bot{width:2px;height:8px;top:6px;left:-1px}
+        .ch-lft{width:8px;height:2px;top:-1px;left:-14px}
+        .ch-rgt{width:8px;height:2px;top:-1px;left:6px}
+        .ch-dot{width:3px;height:3px;background:rgba(255,255,255,0.9);border-radius:50%;position:absolute;top:-1.5px;left:-1.5px}
+        /* Player count */
+        #player-count-box{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+            background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);padding:8px 22px;display:flex;
+            align-items:center;gap:10px;clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%);
+            border:1px solid rgba(255,255,255,0.12)}
+        .pc-icon{width:18px;height:20px;position:relative;flex-shrink:0}
+        .pc-icon::before{content:'';position:absolute;width:10px;height:10px;background:#fff;border-radius:50%;left:4px;top:0}
+        .pc-icon::after{content:'';position:absolute;width:14px;height:9px;background:#fff;border-radius:4px 4px 0 0;left:2px;top:11px}
+        #player-count{font-size:30px;font-weight:800;line-height:1;color:#fff}
+        #player-count-label{font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:2px;text-transform:uppercase;align-self:flex-end;margin-bottom:2px}
+        /* Storm timer */
+        #storm-timer-box{position:absolute;top:62px;left:50%;transform:translateX(-50%);text-align:center}
+        #storm-timer{font-size:13px;color:rgba(200,220,255,0.75);letter-spacing:2px;text-transform:uppercase}
+        /* Minimap */
+        #minimap-wrap{position:absolute;top:14px;right:14px;border-radius:50%;overflow:hidden;
+            box-shadow:0 0 0 2px rgba(255,255,255,0.25),0 4px 24px rgba(0,0,0,0.7)}
+        #minimap-canvas{display:block;width:144px;height:144px}
+        /* Kill feed */
+        #killfeed{position:absolute;top:175px;right:14px;display:flex;flex-direction:column;gap:5px;min-width:220px}
+        .kf-item{font-size:13px;padding:4px 10px;background:rgba(0,0,0,0.65);letter-spacing:.5px;animation:kfin .15s ease-out;white-space:nowrap}
+        @keyframes kfin{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:none}}
+        .kf-kill{color:#ff9999;border-left:3px solid #ff4444}
+        .kf-storm{color:#aaaaff;border-left:3px solid var(--storm)}
+        /* Health / Shield */
+        #health-shield-box{position:absolute;bottom:104px;left:36px;width:290px}
+        .bar-group{margin-bottom:7px}
+        .bar-label-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+        .bar-type{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.5)}
+        .bar-val{font-size:20px;font-weight:700;line-height:1}
+        .bar-bg{width:100%;height:12px;background:rgba(255,255,255,0.1);position:relative;overflow:hidden;
+            clip-path:polygon(0 0,100% 0,calc(100% - 4px) 100%,0 100%)}
+        .bar-fill{height:100%;transition:width .15s ease-out;position:relative}
+        .bar-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,0.25) 0%,transparent 60%)}
+        #health-fill{background:linear-gradient(90deg,#c20,#f54);width:100%}
+        #shield-fill{background:linear-gradient(90deg,#05c,#4af);width:100%}
+        /* Inventory */
+        #inventory-bar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:5px}
+        .slot{width:74px;height:84px;background:rgba(0,0,0,0.7);border:2px solid rgba(255,255,255,0.18);
+            display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+            position:relative;transition:border-color .1s,background .1s;
+            clip-path:polygon(5px 0%,100% 0%,calc(100% - 5px) 100%,0% 100%)}
+        .slot.active{border-color:var(--gold);background:rgba(245,197,24,0.14)}
+        .slot.active .slot-num{color:var(--gold)}
+        .slot-num{position:absolute;top:4px;left:7px;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);line-height:1}
+        .slot-icon{width:38px;height:26px;position:relative;flex-shrink:0}
+        .slot-name{font-size:9px;letter-spacing:.5px;color:rgba(255,255,255,0.65);text-align:center;text-transform:uppercase;line-height:1.15;padding:0 4px;min-height:20px}
+        /* Weapon icons */
+        .icon-pickaxe::before{content:'';position:absolute;width:4px;height:24px;background:#aaa;left:calc(50% - 2px);top:1px;transform:rotate(25deg);border-radius:2px}
+        .icon-pickaxe::after{content:'';position:absolute;width:20px;height:7px;background:#ccc;left:7px;top:1px;clip-path:polygon(0 50%,25% 0%,100% 0%,100% 100%,25% 100%);border-radius:1px}
+        .icon-ar::before{content:'';position:absolute;width:36px;height:7px;background:#999;top:10px;left:1px;border-radius:0 2px 2px 0}
+        .icon-ar::after{content:'';position:absolute;width:14px;height:7px;background:#bbb;top:3px;left:7px;border-radius:1px}
+        .icon-shotgun::before{content:'';position:absolute;width:28px;height:10px;background:#999;top:8px;left:4px;border-radius:2px}
+        .icon-shotgun::after{content:'';position:absolute;width:10px;height:9px;background:#777;top:9px;left:4px;border-radius:1px}
+        .icon-smg::before{content:'';position:absolute;width:28px;height:7px;background:#999;top:10px;left:4px;border-radius:0 2px 2px 0}
+        .icon-smg::after{content:'';position:absolute;width:9px;height:6px;background:#bbb;top:4px;left:8px;border-radius:1px}
+        .icon-sniper::before{content:'';position:absolute;width:38px;height:5px;background:#999;top:11px;left:0;border-radius:0 3px 3px 0}
+        .icon-sniper::after{content:'';position:absolute;width:6px;height:5px;background:#bbb;top:6px;left:16px;border-radius:2px 2px 0 0}
+        /* Ammo */
+        #ammo-box{position:absolute;bottom:108px;right:36px;text-align:right;display:flex;align-items:baseline;gap:4px;justify-content:flex-end}
+        #ammo-current{font-size:54px;font-weight:800;line-height:1;letter-spacing:-1px}
+        #ammo-sep{font-size:26px;font-weight:400;color:rgba(255,255,255,0.35)}
+        #ammo-reserve{font-size:28px;font-weight:600;color:rgba(255,255,255,0.5)}
+        /* Materials */
+        #materials-box{position:absolute;bottom:20px;right:36px;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+        .mat-row{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700}
+        .mat-icon{width:14px;height:14px;display:inline-block;border-radius:2px;flex-shrink:0}
+        .mat-wood-icon{background:var(--wood)}
+        .mat-stone-icon{background:var(--stone)}
+        .mat-metal-icon{background:var(--metal)}
+        .mat-count{min-width:38px;text-align:right;font-size:18px}
+        .mat-label{font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1px;text-transform:uppercase;min-width:44px;text-align:right}
+        /* Build mode */
+        #build-indicator{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translateY(-110px);
+            display:none;background:rgba(0,0,0,0.8);border:1px solid rgba(0,200,255,0.4);padding:12px 26px;text-align:center;min-width:180px}
+        #build-type-name{font-size:22px;font-weight:700;color:#0df;letter-spacing:3px;text-transform:uppercase}
+        #build-mat-name{font-size:13px;color:rgba(255,255,255,0.55);letter-spacing:2px;margin-top:3px;text-transform:uppercase}
+        .build-hint-text{font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:1px;margin-top:7px;text-transform:uppercase}
+        /* Other overlays */
+        #damage-flash{position:absolute;inset:0;background:rgba(200,0,0,0.28);opacity:0;transition:opacity .18s;pointer-events:none}
+        #notification{position:absolute;top:38%;left:50%;transform:translateX(-50%);font-size:20px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--gold);opacity:0;transition:opacity .4s;pointer-events:none}
+        #kill-counter{position:absolute;top:14px;left:14px;background:rgba(0,0,0,0.6);padding:8px 16px;clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%);border:1px solid rgba(255,255,255,0.1)}
+        .kc-skull{width:16px;height:16px;display:inline-block;background:rgba(255,255,255,0.8);border-radius:50% 50% 40% 40%;position:relative;vertical-align:middle;margin-right:6px}
+        .kc-skull::after{content:'';position:absolute;width:8px;height:4px;background:rgba(0,0,0,0.7);border-radius:0 0 4px 4px;bottom:-2px;left:4px}
+        #kill-count-val{font-size:22px;font-weight:700;vertical-align:middle}
+    </style>
 </head>
 <body>
-<div id="ui">
-  <div class="chr"><div class="chr-h"></div><div class="chr-v"></div><div class="chr-d"></div></div>
-  <div id="btm-l">
-    <div class="bp"><div class="bl" style="color:#5f5;">HP</div><div class="bo"><div class="bn" id="hpt">100</div><div class="bi hp" id="hpf" style="width:100%"></div></div></div>
-    <div class="bp"><div class="bl" style="color:#5af;">SH</div><div class="bo"><div class="bn" id="sht">100</div><div class="bi sh" id="shf" style="width:100%"></div></div></div>
-  </div>
-  <div id="rt-p">
-    <div id="wn">Pickaxe</div><div id="am">30</div>
-    <div class="rs">
-      <div class="ri"><span class="ric wd"></span><span id="wd">200</span></div>
-      <div class="ri"><span class="ric st"></span><span id="sn">150</span></div>
-      <div class="ri"><span class="ric mt"></span><span id="ml">100</span></div>
-    </div>
-  </div>
-  <div id="mmw"><canvas id="mm" width="170" height="170"></canvas></div>
-  <div id="msg"></div>
-  <div id="bld-ind"></div>
-  <div id="ctrl">WASD Move | Mouse Look | LMB Shoot | RMB Build | Q Build Mode | 1/2/3 Piece | R Switch Weapon</div>
+
+<div id="lobby">
+    <canvas id="lobby-canvas"></canvas>
+    <div class="lobby-title">Battle Royale</div>
+    <div class="lobby-sub">LAST ONE STANDING</div>
+    <input id="name-input" type="text" maxlength="14" placeholder="YOUR NAME" value="PLAYER">
+    <button id="play-btn">DROP NOW</button>
 </div>
 
-<script type="importmap">
-  { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
-</script>
+<canvas id="game-canvas"></canvas>
 
-<script type="module">
-  import * as THREE from 'three';
+<div id="hud">
+    <div id="crosshair"><div class="ch-arm ch-top"></div><div class="ch-arm ch-bot"></div><div class="ch-arm ch-lft"></div><div class="ch-arm ch-rgt"></div><div class="ch-dot"></div></div>
+    <div id="player-count-box"><div class="pc-icon"></div><div id="player-count">100</div><div id="player-count-label">Alive</div></div>
+    <div id="storm-timer-box"><div id="storm-timer">Safe Zone Active</div></div>
+    <div id="kill-counter"><span class="kc-skull"></span><span id="kill-count-val">0</span></div>
+    <div id="minimap-wrap"><canvas id="minimap-canvas" width="144" height="144"></canvas></div>
+    <div id="killfeed"></div>
+    <div id="health-shield-box">
+        <div class="bar-group"><div class="bar-label-row"><span class="bar-type">Shield</span><span class="bar-val" id="shield-value">100</span></div><div class="bar-bg"><div class="bar-fill" id="shield-fill"></div></div></div>
+        <div class="bar-group"><div class="bar-label-row"><span class="bar-type">Health</span><span class="bar-val" id="health-value">100</span></div><div class="bar-bg"><div class="bar-fill" id="health-fill"></div></div></div>
+    </div>
+    <div id="inventory-bar">
+        <div class="slot active" id="slot-0"><div class="slot-num">1</div><div class="slot-icon icon-pickaxe"></div><div class="slot-name">Harvesting</div></div>
+        <div class="slot" id="slot-1"><div class="slot-num">2</div><div class="slot-icon"></div><div class="slot-name"></div></div>
+        <div class="slot" id="slot-2"><div class="slot-num">3</div><div class="slot-icon"></div><div class="slot-name"></div></div>
+        <div class="slot" id="slot-3"><div class="slot-num">4</div><div class="slot-icon"></div><div class="slot-name"></div></div>
+        <div class="slot" id="slot-4"><div class="slot-num">5</div><div class="slot-icon"></div><div class="slot-name"></div></div>
+    </div>
+    <div id="ammo-box"><span id="ammo-current">--</span><span id="ammo-sep">/</span><span id="ammo-reserve">--</span></div>
+    <div id="materials-box">
+        <div class="mat-row"><span class="mat-label">WOOD</span><span class="mat-icon mat-wood-icon"></span><span class="mat-count" id="mat-wood">200</span></div>
+        <div class="mat-row"><span class="mat-label">STONE</span><span class="mat-icon mat-stone-icon"></span><span class="mat-count" id="mat-stone">150</span></div>
+        <div class="mat-row"><span class="mat-label">METAL</span><span class="mat-icon mat-metal-icon"></span><span class="mat-count" id="mat-metal">75</span></div>
+    </div>
+    <div id="build-indicator"><div id="build-type-name">WALL</div><div id="build-mat-name">WOOD</div><div class="build-hint-text">LMB: Place &bull; G: Material &bull; Scroll: Type &bull; Q: Cancel</div></div>
+    <div id="damage-flash"></div>
+    <div id="notification"></div>
+</div>
 
-  // ===== Load WASM =====
-  const response = await fetch('game.wasm');
-  const wasmModule = await WebAssembly.instantiateStreaming(response, {});
-  const wasm = wasmModule.instance.exports;
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="utils.js"></script>
+<script src="weapons.js"></script>
+<script src="building.js"></script>
+<script src="player.js"></script>
+<script src="enemy.js"></script>
+<script src="ui.js"></script>
+<script src="lobby.js"></script>
+<script src="game.js"></script>
 
-  // ===== Three.js Setup =====
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 100, 400);
-
-  const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.5, 500);
-  camera.position.set(0, 200, 50);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  document.body.appendChild(renderer.domElement);
-
-  // Lights
-  const ambient = new THREE.AmbientLight(0x405070);
-  scene.add(ambient);
-  const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
-  sun.position.set(100, 200, 60);
-  sun.castShadow = true;
-  sun.shadow.mapSize.width = 1024;
-  sun.shadow.mapSize.height = 1024;
-  sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 500;
-  sun.shadow.camera.left = -150;
-  sun.shadow.camera.right = 150;
-  sun.shadow.camera.top = 150;
-  sun.shadow.camera.bottom = -150;
-  scene.add(sun);
-
-  // Ground
-  const groundGeo = new THREE.PlaneGeometry(300, 300);
-  const groundMat = new THREE.MeshLambertian({ color: 0x3a6b1e });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
-  ground.rotation.x = -Math.PI/2;
-  ground.position.y = -0.1;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // Grid lines for reference
-  const gridHelper = new THREE.GridHelper(300, 60, 0x335522, 0x224418);
-  gridHelper.position.y = 0;
-  scene.add(gridHelper);
-
-  // Player meshes
-  const playerMeshes = [];
-  const playerMaterials = [];
-  for (let i = 0; i < 16; i++) {
-    const isPlayer = i === 0;
-    const geo = new THREE.BoxGeometry(0.7, 1.8, 0.7);
-    const mat = new THREE.MeshLambertian({ color: isPlayer ? 0xffaa00 : 0xdd3333 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.visible = false;
-    scene.add(mesh);
-
-    // Head
-    const headGeo = new THREE.SphereGeometry(0.3, 8, 8);
-    const headMat = new THREE.MeshLambertian({ color: isPlayer ? 0xffcc66 : 0xff6666 });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 1.15;
-    head.castShadow = true;
-    mesh.add(head);
-
-    // Gun
-    const gunGeo = new THREE.BoxGeometry(0.12, 0.12, 0.7);
-    const gunMat = new THREE.MeshLambertian({ color: 0x333333 });
-    const gun = new THREE.Mesh(gunGeo, gunMat);
-    gun.position.set(0.4, 0.4, 0.3);
-    gun.castShadow = true;
-    mesh.add(gun);
-
-    playerMeshes.push(mesh);
-    playerMaterials.push(mat);
-  }
-
-  // Structure meshes cache
-  const structureGroup = new THREE.Group();
-  scene.add(structureGroup);
-  const structureMeshes = new Map();
-
-  // Chest meshes
-  const chestMeshes = [];
-  const chestGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8);
-  const chestMat = new THREE.MeshLambertian({ color: 0xd4a840 });
-  const chestGoldMat = new THREE.MeshLambertian({ color: 0x888888 });
-  for (let i = 0; i < 20; i++) {
-    const chest = new THREE.Mesh(chestGeo, chestMat);
-    chest.castShadow = true;
-    chest.receiveShadow = true;
-    chest.visible = false;
-    scene.add(chest);
-    chestMeshes.push(chest);
-  }
-
-  // Storm cylinder
-  const stormGeo = new THREE.CylinderGeometry(200, 200, 400, 64);
-  const stormMat = new THREE.MeshBasicMaterial({
-    color: 0x9944ff,
-    transparent: true,
-    opacity: 0.25,
-    side: THREE.DoubleSide
-  });
-  const stormMesh = new THREE.Mesh(stormGeo, stormMat);
-  stormMesh.position.y = 200;
-  scene.add(stormMesh);
-
-  // ===== Input State =====
-  const inputState = {
-    forward: 0, backward: 0, left: 0, right: 0,
-    jump: 0, shoot: 0, build: 0, switchWeapon: 0,
-    mouseDx: 0, mouseDy: 0, buildPiece: 0
-  };
-
-  document.addEventListener('keydown', e => {
-    switch(e.code) {
-      case 'KeyW': inputState.forward = 1; break;
-      case 'KeyS': inputState.backward = 1; break;
-      case 'KeyA': inputState.left = 1; break;
-      case 'KeyD': inputState.right = 1; break;
-      case 'Space': inputState.jump = 1; e.preventDefault(); break;
-      case 'KeyR': inputState.switchWeapon = 1; break;
-      case 'Digit1': inputState.buildPiece = 0; break;
-      case 'Digit2': inputState.buildPiece = 1; break;
-      case 'Digit3': inputState.buildPiece = 2; break;
-    }
-  });
-  document.addEventListener('keyup', e => {
-    switch(e.code) {
-      case 'KeyW': inputState.forward = 0; break;
-      case 'KeyS': inputState.backward = 0; break;
-      case 'KeyA': inputState.left = 0; break;
-      case 'KeyD': inputState.right = 0; break;
-      case 'Space': inputState.jump = 0; break;
-      case 'KeyR': inputState.switchWeapon = 0; break;
-    }
-  });
-
-  document.addEventListener('mousedown', e => {
-    if (e.button === 0) inputState.shoot = 1;
-    if (e.button === 2) { inputState.build = 1; e.preventDefault(); }
-  });
-  document.addEventListener('mouseup', e => {
-    if (e.button === 0) inputState.shoot = 0;
-    if (e.button === 2) { inputState.build = 0; e.preventDefault(); }
-  });
-  document.addEventListener('contextmenu', e => e.preventDefault());
-
-  document.addEventListener('mousemove', e => {
-    if (document.pointerLockElement) {
-      inputState.mouseDx += e.movementX * 0.003;
-      inputState.mouseDy += e.movementY * 0.003;
-    }
-  });
-  document.body.addEventListener('click', () => {
-    if (!document.pointerLockElement) document.body.requestPointerLock();
-  });
-
-  // ===== Initialize Game =====
-  wasm.initGame();
-
-  // ===== UI Elements =====
-  const uiHpText = document.getElementById('hpt');
-  const uiHpFill = document.getElementById('hpf');
-  const uiShText = document.getElementById('sht');
-  const uiShFill = document.getElementById('shf');
-  const uiWeaponName = document.getElementById('wn');
-  const uiAmmo = document.getElementById('am');
-  const uiWood = document.getElementById('wd');
-  const uiStone = document.getElementById('sn');
-  const uiMetal = document.getElementById('ml');
-  const uiMsg = document.getElementById('msg');
-  const uiBuildInd = document.getElementById('bld-ind');
-  const mmCanvas = document.getElementById('mm');
-  const mmCtx = mmCanvas.getContext('2d');
-
-  const weaponNames = ['Pickaxe', 'Assault Rifle', 'Shotgun'];
-
-  function showMessage(text, duration = 2000) {
-    uiMsg.textContent = text;
-    uiMsg.style.opacity = '1';
-    setTimeout(() => { uiMsg.style.opacity = '0'; }, duration);
-  }
-
-  // ===== Structure Mesh Management =====
-  function updateStructureMeshes() {
-    const dim = wasm.getGridDim();
-    // Simple approach: rebuild all visible structures each frame
-    // For performance with WASM, we batch this
-    structureGroup.clear();
-    structureMeshes.clear();
-
-    const wallGeo = new THREE.BoxGeometry(2, 3, 2);
-    const floorGeo = new THREE.BoxGeometry(2, 0.3, 2);
-    const rampGeo = new THREE.ConeGeometry(1.2, 2, 4);
-
-    const matWall = new THREE.MeshLambertian({ color: 0x8B7355 });
-    const matFloor = new THREE.MeshLambertian({ color: 0x9B8B75 });
-    const matRamp = new THREE.MeshLambertian({ color: 0x6B5B45 });
-
-    const halfMap = 150;
-    for (let iz = 0; iz < dim; iz++) {
-      for (let ix = 0; ix < dim; ix++) {
-        const tile = wasm.getGridTile(ix, iz);
-        if (tile === 0) continue;
-
-        const x = (ix + 0.5) * 2 - halfMap;
-        const z = (iz + 0.5) * 2 - halfMap;
-        let mesh;
-
-        if (tile === 1) {
-          mesh = new THREE.Mesh(wallGeo, matWall);
-        } else if (tile === 2) {
-          const m = new THREE.Mesh(floorGeo, matFloor);
-          m.position.y = 0.15;
-          mesh = m;
-        } else {
-          const m = new THREE.Mesh(rampGeo, matRamp);
-          m.position.y = 0.5;
-          mesh = m;
-        }
-
-        if (tile !== 2) mesh.position.y = 1.5;
-        mesh.position.x = x;
-        mesh.position.z = z;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        structureGroup.add(mesh);
-        structureMeshes.set(`${ix},${iz}`, mesh);
-      }
-    }
-  }
-
-  // ===== Game Loop =====
-  let prevTime = performance.now();
-  let structureUpdateCounter = 0;
-
-  function gameLoop() {
-    requestAnimationFrame(gameLoop);
-
-    const now = performance.now();
-    const dt = Math.min((now - prevTime) / 1000, 0.1);
-    prevTime = now;
-
-    // Send input to WASM
-    wasm.setInput(
-      inputState.forward, inputState.backward, inputState.left, inputState.right,
-      inputState.jump, inputState.shoot, inputState.build, inputState.switchWeapon,
-      inputState.mouseDx, inputState.mouseDy, inputState.buildPiece
-    );
-    inputState.mouseDx = 0;
-    inputState.mouseDy = 0;
-
-    // Reset single-frame inputs
-    inputState.shoot = 0;
-    inputState.build = 0;
-    inputState.switchWeapon = 0;
-
-    // Update game
-    wasm.update(dt);
-
-    // Update player positions
-    const numPlayers = wasm.getNumPlayers();
-    for (let i = 0; i < numPlayers; i++) {
-      const mesh = playerMeshes[i];
-      if (!mesh) continue;
-      const alive = wasm.getPlayerAlive(i);
-      mesh.visible = alive === 1;
-      if (alive) {
-        mesh.position.set(wasm.getPlayerX(i), wasm.getPlayerY(i), wasm.getPlayerZ(i));
-        mesh.rotation.y = wasm.getPlayerYaw(i);
-      }
-    }
-
-    // Update chests
-    for (let i = 0; i < 20; i++) {
-      const chest = chestMeshes[i];
-      const opened = wasm.getChestOpened(i);
-      chest.visible = opened === 0;
-      if (!opened) {
-        chest.position.set(wasm.getChestX(i), 0.3, wasm.getChestZ(i));
-        chest.material = chestMat;
-      }
-    }
-
-    // Update structures periodically
-    structureUpdateCounter++;
-    if (structureUpdateCounter > 30) {
-      updateStructureMeshes();
-      structureUpdateCounter = 0;
-    }
-
-    // Update storm mesh
-    const stormRadius = wasm.getStormRadius();
-    stormMesh.scale.set(stormRadius / 200, 1, stormRadius / 200);
-
-    // Camera follow player
-    const px = wasm.getPlayerX(0);
-    const py = wasm.getPlayerY(0);
-    const pz = wasm.getPlayerZ(0);
-    const pyaw = wasm.getPlayerYaw(0);
-    const ppitch = wasm.getPlayerPitch(0);
-
-    const camDist = 5;
-    const camHeight = 2.5;
-    const camX = px - Math.sin(pyaw) * camDist * Math.cos(ppitch);
-    const camY = py + camHeight + Math.sin(ppitch) * camDist;
-    const camZ = pz - Math.cos(pyaw) * camDist * Math.cos(ppitch);
-
-    camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.2);
-    camera.lookAt(px, py + 1.2, pz);
-
-    // Update UI
-    const hp = Math.max(0, Math.round(wasm.getPlayerHealth(0)));
-    const sh = Math.max(0, Math.round(wasm.getPlayerShield(0)));
-    uiHpText.textContent = hp;
-    uiHpFill.style.width = hp + '%';
-    uiShText.textContent = sh;
-    uiShFill.style.width = sh + '%';
-
-    const weapon = wasm.getPlayerWeapon(0);
-    const ammo = wasm.getPlayerAmmo(0);
-    uiWeaponName.textContent = weaponNames[weapon] || 'Pickaxe';
-    uiAmmo.textContent = weapon === 0 ? '--' : ammo;
-    uiWood.textContent = wasm.getPlayerWood(0);
-    uiStone.textContent = wasm.getPlayerStone(0);
-    uiMetal.textContent = wasm.getPlayerMetal(0);
-
-    // Build indicator
-    const buildMode = inputState.buildPiece !== undefined;
-    uiBuildInd.style.display = buildMode ? 'block' : 'none';
-
-    // Check win/lose
-    if (wasm.getPlayerAlive(0) === 0) {
-      showMessage('ELIMINATED', 999999);
-    } else if (wasm.getAliveCount() <= 1) {
-      showMessage('VICTORY ROYALE!', 999999);
-    }
-
-    // Update minimap
-    mmCtx.clearRect(0, 0, 170, 170);
-    // Background
-    mmCtx.fillStyle = '#1a1a2e';
-    mmCtx.beginPath();
-    mmCtx.arc(85, 85, 83, 0, Math.PI * 2);
-    mmCtx.fill();
-
-    // Storm circle
-    mmCtx.strokeStyle = '#9944ff';
-    mmCtx.lineWidth = 2;
-    mmCtx.beginPath();
-    mmCtx.arc(85, 85, (stormRadius / 200) * 80, 0, Math.PI * 2);
-    mmCtx.stroke();
-
-    // Players on minimap
-    for (let i = 0; i < numPlayers; i++) {
-      if (!wasm.getPlayerAlive(i)) continue;
-      const mx = (wasm.getPlayerX(i) / 150) * 80 + 85;
-      const mz = (wasm.getPlayerZ(i) / 150) * 80 + 85;
-      mmCtx.fillStyle = i === 0 ? '#ffaa00' : '#ff4444';
-      mmCtx.beginPath();
-      mmCtx.arc(mx, mz, i === 0 ? 3 : 2, 0, Math.PI * 2);
-      mmCtx.fill();
-    }
-
-    renderer.render(scene, camera);
-  }
-
-  // Initial structure build
-  updateStructureMeshes();
-  showMessage('DROP FROM THE BATTLE BUS!', 3000);
-
-  // Start
-  gameLoop();
-
-  // Resize handler
-  window.addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
-</script>
 </body>
 </html>
