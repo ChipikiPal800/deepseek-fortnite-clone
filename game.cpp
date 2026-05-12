@@ -1,434 +1,553 @@
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
+#include <cstdlib>
 #include <emscripten.h>
 
-// ---------- Constants ----------
-#define MAP_SIZE 300
+// ===== Constants =====
+#define MAP_SIZE 300.0f
 #define GRID_RES 2.0f
-#define GRID_DIM (int)(MAP_SIZE / GRID_RES)
+#define GRID_DIM 150
 #define MAX_PLAYERS 16
-#define MAX_BOTS 10
+#define MAX_CHESTS 20
 #define PI 3.14159265359f
 
-// ---------- Enums & Structs ----------
-enum WeaponType { WEAPON_PICKAXE, WEAPON_AR, WEAPON_SHOTGUN };
-enum BuildPiece { BUILD_WALL, BUILD_FLOOR, BUILD_RAMP };
+// ===== Weapon Types =====
+enum Weapon {
+  WEAPON_PICKAXE = 0,
+  WEAPON_AR = 1,
+  WEAPON_SHOTGUN = 2
+};
 
+// ===== Build Piece Types =====
+enum BuildType {
+  BUILD_WALL = 1,
+  BUILD_FLOOR = 2,
+  BUILD_RAMP = 3
+};
+
+// ===== Player Structure =====
 struct Player {
-    float x, y, z;        // position
-    float vx, vy, vz;     // velocity
-    float yaw, pitch;     // view angles
-    float health;
-    float shield;
-    int weapon;
-    int ammo;
-    int wood, stone, metal;
-    bool alive;
-    bool onGround;
-    bool isBot;
-    float botTimer;
+  float x, y, z;
+  float vx, vy, vz;
+  float yaw, pitch;
+  float health, shield;
+  int weapon;
+  int ammo;
+  int wood, stone, metal;
+  bool alive;
+  bool onGround;
+  bool isBot;
+  float botTimer;
+  float botShootCd;
+  float botBuildCd;
+  float botWanderAngle;
+  int botTarget;
 };
 
-struct BotState {
-    int target;
-    float shootCooldown;
-    float buildCooldown;
-    float wanderAngle;
-};
-
+// ===== Game State =====
 struct GameState {
-    Player players[MAX_PLAYERS];
-    int numPlayers;
-    int grid[GRID_DIM][GRID_DIM];  // 0=empty, 1=wall, 2=floor, 3=ramp
-    float stormCenterX, stormCenterZ;
-    float stormRadius;
-    float stormTargetRadius;
-    float stormShrinkTimer;
-    int chestPositions[20][2];
-    bool chestOpened[20];
-    int killFeed[5];
-    int killFeedCount;
+  Player players[MAX_PLAYERS];
+  int numPlayers;
+  int grid[GRID_DIM * GRID_DIM]; // 0=empty, 1=wall, 2=floor, 3=ramp
+  float stormCenterX, stormCenterZ;
+  float stormRadius;
+  float stormTargetRadius;
+  float stormShrinkTimer;
+  bool stormActive;
+  float chestX[MAX_CHESTS];
+  float chestZ[MAX_CHESTS];
+  bool chestOpened[MAX_CHESTS];
+  int aliveCount;
 };
 
-// ---------- Globals ----------
-GameState g;
-BotState bots[MAX_BOTS];
-float g_deltaTime = 0.0f;
+// ===== Global State =====
+GameState g_state;
 
-// Input state (set from JS)
-struct Input {
-    bool forward, backward, left, right, jump;
-    bool shoot, build, switchWeapon;
-    bool buildMode;
-    int buildPiece; // 0=wall, 1=floor, 2=ramp
-    float mouseDx, mouseDy;
+// ===== Input State (written by JS) =====
+struct InputState {
+  float forward;
+  float backward;
+  float left;
+  float right;
+  float jump;
+  float shoot;
+  float build;
+  float switchWeapon;
+  float mouseDx;
+  float mouseDy;
+  int buildPiece; // 0=wall, 1=floor, 2=ramp
 };
-Input g_input;
 
-// ---------- Helper Functions ----------
-static int gridIdx(float x, float z) {
-    int ix = (int)((x + MAP_SIZE/2) / GRID_RES);
-    int iz = (int)((z + MAP_SIZE/2) / GRID_RES);
-    if (ix < 0) ix = 0; if (ix >= GRID_DIM) ix = GRID_DIM-1;
-    if (iz < 0) iz = 0; if (iz >= GRID_DIM) iz = GRID_DIM-1;
-    return iz * GRID_DIM + ix;
+InputState g_input;
+bool g_inputDirty = false;
+
+// ===== Helper Functions =====
+static int gridIndex(float x, float z) {
+  int ix = (int)((x + MAP_SIZE / 2.0f) / GRID_RES);
+  int iz = (int)((z + MAP_SIZE / 2.0f) / GRID_RES);
+  if (ix < 0) ix = 0;
+  if (ix >= GRID_DIM) ix = GRID_DIM - 1;
+  if (iz < 0) iz = 0;
+  if (iz >= GRID_DIM) iz = GRID_DIM - 1;
+  return iz * GRID_DIM + ix;
+}
+
+static bool isSolid(int tile) {
+  return tile == BUILD_WALL || tile == BUILD_RAMP;
 }
 
 static bool isBlocked(float x, float z) {
-    int idx = gridIdx(x, z);
-    int iz = idx / GRID_DIM;
-    int ix = idx % GRID_DIM;
-    return g.grid[iz][ix] == 1 || g.grid[iz][ix] == 3; // solid walls/ramps
+  int idx = gridIndex(x, z);
+  return isSolid(g_state.grid[idx]);
 }
 
-static bool isSolid(int tile) { return tile == 1 || tile == 3; }
+static float clamp(float val, float minVal, float maxVal) {
+  if (val < minVal) return minVal;
+  if (val > maxVal) return maxVal;
+  return val;
+}
 
-// ---------- Game Init ----------
+// ===== Initialize Game =====
 extern "C" EMSCRIPTEN_KEEPALIVE
-void init() {
-    memset(&g, 0, sizeof(g));
-    g.stormCenterX = 0;
-    g.stormCenterZ = 0;
-    g.stormRadius = 200.0f;
-    g.stormTargetRadius = 10.0f;
-    g.stormShrinkTimer = 30.0f;
-    g.numPlayers = 1 + MAX_BOTS;
+void initGame() {
+  memset(&g_state, 0, sizeof(GameState));
+  memset(&g_input, 0, sizeof(InputState));
 
-    // Place chests
-    for (int i = 0; i < 20; i++) {
-        g.chestPositions[i][0] = (rand() % MAP_SIZE) - MAP_SIZE/2;
-        g.chestPositions[i][1] = (rand() % MAP_SIZE) - MAP_SIZE/2;
-        g.chestOpened[i] = false;
-    }
+  // Initialize grid
+  for (int i = 0; i < GRID_DIM * GRID_DIM; i++) {
+    g_state.grid[i] = 0;
+  }
 
-    // Initialize player
-    Player* p = &g.players[0];
-    p->x = (rand() % 100) - 50;
-    p->z = (rand() % 100) - 50;
-    p->y = 200; // start from bus
-    p->health = 100;
-    p->shield = 100;
-    p->weapon = WEAPON_PICKAXE;
-    p->ammo = 30;
-    p->wood = 100; p->stone = 50; p->metal = 20;
-    p->alive = true;
-    p->onGround = false;
-
-    // Initialize bots
-    for (int i = 1; i < g.numPlayers; i++) {
-        Player* b = &g.players[i];
-        b->x = (rand() % 200) - 100;
-        b->z = (rand() % 200) - 100;
-        b->y = 200;
-        b->health = 100;
-        b->shield = 50 + rand()%50;
-        b->weapon = WEAPON_AR;
-        b->ammo = 30 + rand()%30;
-        b->alive = true;
-        b->onGround = false;
-        b->isBot = true;
-        BotState* bs = &bots[i-1];
-        bs->target = 0;
-        bs->shootCooldown = 0.5f + (rand()%100)/50.0f;
-        bs->buildCooldown = 2.0f + rand()%3;
-    }
-
-    // Place some pre-built structures
-    for (int i = 0; i < 15; i++) {
-        int cx = rand() % (GRID_DIM-10) + 5;
-        int cz = rand() % (GRID_DIM-10) + 5;
-        for (int dx = 0; dx < 4; dx++)
-            for (int dz = 0; dz < 4; dz++)
-                g.grid[cz+dz][cx+dx] = 1; // walls
-    }
-
-    g.killFeedCount = 0;
-    memset(g.killFeed, 0, sizeof(g.killFeed));
-}
-
-// ---------- Player Movement & Physics ----------
-static void movePlayer(Player* p, float dt) {
-    if (!p->alive) return;
-    float speed = 12.0f;
-    float moveX = 0, moveZ = 0;
-    if (g_input.forward) { moveX += sin(p->yaw); moveZ += cos(p->yaw); }
-    if (g_input.backward) { moveX -= sin(p->yaw); moveZ -= cos(p->yaw); }
-    if (g_input.left) { moveX -= cos(p->yaw); moveZ += sin(p->yaw); }
-    if (g_input.right) { moveX += cos(p->yaw); moveZ -= sin(p->yaw); }
-
-    float len = sqrt(moveX*moveX + moveZ*moveZ);
-    if (len > 0) { moveX /= len; moveZ /= len; }
-
-    // Apply movement
-    p->vx = moveX * speed;
-    p->vz = moveZ * speed;
-
-    // Gravity
-    if (!p->onGround) p->vy -= 30.0f * dt;
-    if (g_input.jump && p->onGround) {
-        p->vy = 14.0f;
-        p->onGround = false;
-    }
-
-    // Integrate
-    p->x += p->vx * dt;
-    p->y += p->vy * dt;
-    p->z += p->vz * dt;
-
-    // Collision with ground (height = 0)
-    if (p->y <= 0.0f) {
-        p->y = 0.0f;
-        p->vy = 0;
-        p->onGround = true;
-    }
-
-    // Collision with grid structures (simple AABB)
-    int gi = gridIdx(p->x, p->z);
-    int iz = gi / GRID_DIM;
-    int ix = gi % GRID_DIM;
-    if (isSolid(g.grid[iz][ix])) {
-        // Push back
-        float cx = (ix + 0.5f) * GRID_RES - MAP_SIZE/2;
-        float cz = (iz + 0.5f) * GRID_RES - MAP_SIZE/2;
-        float dx = p->x - cx;
-        float dz = p->z - cz;
-        if (fabs(dx) > fabs(dz)) p->x = cx + (dx>0?1.0f:-1.0f)*GRID_RES/2;
-        else p->z = cz + (dz>0?1.0f:-1.0f)*GRID_RES/2;
-    }
-
-    // World bounds
-    if (p->x < -MAP_SIZE/2) p->x = -MAP_SIZE/2;
-    if (p->x > MAP_SIZE/2) p->x = MAP_SIZE/2;
-    if (p->z < -MAP_SIZE/2) p->z = -MAP_SIZE/2;
-    if (p->z > MAP_SIZE/2) p->z = MAP_SIZE/2;
-}
-
-// ---------- Building ----------
-static void build(Player* p) {
-    if (p->wood < 10 && p->stone < 10 && p->metal < 10) return;
-    // Determine build position in front of player
-    float dist = 4.0f;
-    float fx = p->x + sin(p->yaw) * dist;
-    float fz = p->z + cos(p->yaw) * dist;
-    int gi = gridIdx(fx, fz);
-    int iz = gi / GRID_DIM;
-    int ix = gi % GRID_DIM;
-    if (iz < 0 || iz >= GRID_DIM || ix < 0 || ix >= GRID_DIM) return;
-    if (g.grid[iz][ix] != 0) return;
-
-    int type = g_input.buildPiece;
-    // Check materials
-    if (type == BUILD_WALL && p->wood >= 10) { p->wood -= 10; }
-    else if (type == BUILD_FLOOR && p->stone >= 10) { p->stone -= 10; }
-    else if (type == BUILD_RAMP && p->metal >= 10) { p->metal -= 10; }
-    else return;
-
-    g.grid[iz][ix] = (type == BUILD_WALL) ? 1 : (type == BUILD_FLOOR ? 2 : 3);
-}
-
-// ---------- Shooting ----------
-static void shoot(Player* shooter, Player* target, float dmg) {
-    if (!target->alive) return;
-    if (target->shield > 0) {
-        if (target->shield >= dmg) { target->shield -= dmg; return; }
-        dmg -= target->shield;
-        target->shield = 0;
-    }
-    target->health -= dmg;
-    if (target->health <= 0) {
-        target->health = 0;
-        target->alive = false;
-        // Add kill feed entry (simplified)
-        g.killFeed[g.killFeedCount % 5] = 1; // dummy
-        g.killFeedCount++;
-    }
-}
-
-static void playerShoot(Player* p) {
-    if (p->ammo <= 0 && p->weapon != WEAPON_PICKAXE) return;
-    if (p->weapon == WEAPON_PICKAXE) {
-        // Harvesting: check if looking at grid block
-        float dist = 3.5f;
-        float fx = p->x + sin(p->yaw) * dist;
-        float fz = p->z + cos(p->yaw) * dist;
-        int gi = gridIdx(fx, fz);
-        int iz = gi / GRID_DIM;
-        int ix = gi % GRID_DIM;
-        if (iz>=0 && iz<GRID_DIM && ix>=0 && ix<GRID_DIM) {
-            int tile = g.grid[iz][ix];
-            if (tile == 1) { p->wood += 15; g.grid[iz][ix] = 0; }
-            else if (tile == 2) { p->stone += 15; g.grid[iz][ix] = 0; }
-            else if (tile == 3) { p->metal += 15; g.grid[iz][ix] = 0; }
+  // Place pre-built structures
+  for (int s = 0; s < 12; s++) {
+    int cx = 20 + (rand() % (GRID_DIM - 40));
+    int cz = 20 + (rand() % (GRID_DIM - 40));
+    for (int dx = 0; dx < 4; dx++) {
+      for (int dz = 0; dz < 4; dz++) {
+        int idx = (cz + dz) * GRID_DIM + (cx + dx);
+        if (idx >= 0 && idx < GRID_DIM * GRID_DIM) {
+          g_state.grid[idx] = BUILD_WALL;
         }
-    } else {
-        // Hitscan (simplified): check all players in front
-        for (int i = 0; i < g.numPlayers; i++) {
-            if (i == 0) continue; // skip self (player is index 0)
-            Player* target = &g.players[i];
-            if (!target->alive) continue;
-            float dx = target->x - p->x;
-            float dz = target->z - p->z;
-            float dot = sin(p->yaw)*dx + cos(p->yaw)*dz;
-            if (dot < 0) continue;
-            float cross = fabs(sin(p->yaw)*dz - cos(p->yaw)*dx);
-            if (cross > 2.0f) continue; // aim tolerance
-            float dist = sqrt(dx*dx+dz*dz);
-            if (dist > 100.0f) continue;
-            float dmg = (p->weapon == WEAPON_AR) ? 33.0f : 90.0f;
-            shoot(p, target, dmg);
-            p->ammo--;
-            break;
-        }
+      }
     }
+  }
+
+  // Place chests
+  for (int i = 0; i < MAX_CHESTS; i++) {
+    g_state.chestX[i] = (float)((rand() % (int)(MAP_SIZE - 40)) - (int)(MAP_SIZE / 2) + 20);
+    g_state.chestZ[i] = (float)((rand() % (int)(MAP_SIZE - 40)) - (int)(MAP_SIZE / 2) + 20);
+    g_state.chestOpened[i] = false;
+  }
+
+  // Storm
+  g_state.stormCenterX = 0;
+  g_state.stormCenterZ = 0;
+  g_state.stormRadius = 200.0f;
+  g_state.stormTargetRadius = 15.0f;
+  g_state.stormShrinkTimer = 60.0f;
+  g_state.stormActive = true;
+
+  // Player
+  g_state.numPlayers = 1 + 10; // 1 human + 10 bots
+  g_state.aliveCount = g_state.numPlayers;
+
+  Player* p = &g_state.players[0];
+  p->x = (float)((rand() % 100) - 50);
+  p->z = (float)((rand() % 100) - 50);
+  p->y = 200.0f;
+  p->vx = 0;
+  p->vy = 0;
+  p->vz = 0;
+  p->yaw = 0;
+  p->pitch = 0;
+  p->health = 100.0f;
+  p->shield = 100.0f;
+  p->weapon = WEAPON_PICKAXE;
+  p->ammo = 30;
+  p->wood = 200;
+  p->stone = 150;
+  p->metal = 100;
+  p->alive = true;
+  p->onGround = false;
+  p->isBot = false;
+
+  // Bots
+  for (int i = 1; i < g_state.numPlayers; i++) {
+    Player* b = &g_state.players[i];
+    b->x = (float)((rand() % 200) - 100);
+    b->z = (float)((rand() % 200) - 100);
+    b->y = 200.0f;
+    b->vx = 0;
+    b->vy = 0;
+    b->vz = 0;
+    b->yaw = (float)(rand() % 360) * PI / 180.0f;
+    b->pitch = 0;
+    b->health = 100.0f;
+    b->shield = (float)(50 + rand() % 50);
+    b->weapon = WEAPON_AR;
+    b->ammo = 30;
+    b->wood = 100;
+    b->stone = 80;
+    b->metal = 50;
+    b->alive = true;
+    b->onGround = false;
+    b->isBot = true;
+    b->botTimer = 0;
+    b->botShootCd = 0.3f + ((float)(rand() % 100) / 100.0f) * 0.5f;
+    b->botBuildCd = 2.0f + (float)(rand() % 3);
+    b->botWanderAngle = (float)(rand() % 360) * PI / 180.0f;
+    b->botTarget = 0;
+  }
 }
 
-// ---------- AI Bot Logic ----------
-static void updateBot(int idx, Player* bot, BotState* bs, float dt) {
-    if (!bot->alive) return;
-    // Find nearest enemy
-    float closestDist = 10000;
-    int targetIdx = 0;
-    for (int i = 0; i < g.numPlayers; i++) {
-        if (i == idx) continue;
-        if (!g.players[i].alive) continue;
-        float dx = g.players[i].x - bot->x;
-        float dz = g.players[i].z - bot->z;
-        float d = dx*dx+dz*dz;
-        if (d < closestDist) { closestDist = d; targetIdx = i; }
-    }
-    bs->target = targetIdx;
-    Player* target = &g.players[targetIdx];
-
-    // Aim toward target
-    float dx = target->x - bot->x;
-    float dz = target->z - bot->z;
-    bot->yaw = atan2(dx, dz);
-
-    // Move toward target if far, circle if close
-    float dist = sqrt(dx*dx+dz*dz);
-    if (dist > 15.0f) {
-        // Simulate forward input
-        bot->vx = sin(bot->yaw) * 8.0f;
-        bot->vz = cos(bot->yaw) * 8.0f;
-    } else {
-        // Strafe
-        bs->wanderAngle += dt * 2.0f;
-        float strafe = sin(bs->wanderAngle);
-        bot->vx = strafe * cos(bot->yaw) * 6.0f;
-        bot->vz = -strafe * sin(bot->yaw) * 6.0f;
-    }
-    // Gravity
-    if (!bot->onGround) bot->vy -= 30.0f*dt;
-    if (bot->y <= 0) { bot->y = 0; bot->vy = 0; bot->onGround = true; }
-    bot->x += bot->vx * dt;
-    bot->z += bot->vz * dt;
-    bot->y += bot->vy * dt;
-
-    // Shooting
-    bs->shootCooldown -= dt;
-    if (dist < 40.0f && bs->shootCooldown <= 0) {
-        // Simulate shot
-        float dmg = 25.0f;
-        if (target->shield > 0) {
-            if (target->shield >= dmg) { target->shield -= dmg; dmg = 0; }
-            else { dmg -= target->shield; target->shield = 0; }
-        }
-        target->health -= dmg;
-        if (target->health <= 0) target->alive = false;
-        bs->shootCooldown = 0.3f + (rand()%100)/200.0f;
-    }
-
-    // Occasionally build
-    bs->buildCooldown -= dt;
-    if (dist < 20.0f && bs->buildCooldown <= 0 && bot->wood>=10) {
-        bot->wood -= 10;
-        float bx = bot->x + sin(bot->yaw)*3.0f;
-        float bz = bot->z + cos(bot->yaw)*3.0f;
-        int gi = gridIdx(bx, bz);
-        int iz = gi/GRID_DIM, ix = gi%GRID_DIM;
-        if (g.grid[iz][ix] == 0) g.grid[iz][ix] = 1;
-        bs->buildCooldown = 2.0f + rand()%2;
-    }
+// ===== Apply Input From JS =====
+extern "C" EMSCRIPTEN_KEEPALIVE
+void setInput(
+  float fwd, float bwd, float lft, float rgt,
+  float jmp, float sht, float bld, float swp,
+  float mdx, float mdy, int bp
+) {
+  g_input.forward = fwd;
+  g_input.backward = bwd;
+  g_input.left = lft;
+  g_input.right = rgt;
+  g_input.jump = jmp;
+  g_input.shoot = sht;
+  g_input.build = bld;
+  g_input.switchWeapon = swp;
+  g_input.mouseDx = mdx;
+  g_input.mouseDy = mdy;
+  g_input.buildPiece = bp;
+  g_inputDirty = true;
 }
 
-// ---------- Storm Update ----------
+// ===== Shoot Logic =====
+static void applyDamage(Player* target, float damage) {
+  if (!target->alive) return;
+  if (target->shield > 0) {
+    if (target->shield >= damage) {
+      target->shield -= damage;
+      return;
+    }
+    damage -= target->shield;
+    target->shield = 0;
+  }
+  target->health -= damage;
+  if (target->health <= 0) {
+    target->health = 0;
+    target->alive = false;
+    g_state.aliveCount--;
+  }
+}
+
+static void playerShoot(Player* shooter) {
+  if (!shooter->alive) return;
+
+  if (shooter->weapon == WEAPON_PICKAXE) {
+    // Harvest mode
+    float reach = 4.0f;
+    float hx = shooter->x + sinf(shooter->yaw) * reach;
+    float hz = shooter->z + cosf(shooter->yaw) * reach;
+    int idx = gridIndex(hx, hz);
+    if (idx >= 0 && idx < GRID_DIM * GRID_DIM) {
+      int tile = g_state.grid[idx];
+      if (tile == BUILD_WALL) {
+        shooter->wood += 20;
+        g_state.grid[idx] = 0;
+      } else if (tile == BUILD_FLOOR) {
+        shooter->stone += 20;
+        g_state.grid[idx] = 0;
+      } else if (tile == BUILD_RAMP) {
+        shooter->metal += 20;
+        g_state.grid[idx] = 0;
+      }
+    }
+    return;
+  }
+
+  // Ranged weapons
+  if (shooter->ammo <= 0) {
+    shooter->weapon = WEAPON_PICKAXE;
+    return;
+  }
+  shooter->ammo--;
+
+  float range = (shooter->weapon == WEAPON_SHOTGUN) ? 30.0f : 100.0f;
+  float damage = (shooter->weapon == WEAPON_AR) ? 33.0f : 90.0f;
+  float spread = (shooter->weapon == WEAPON_SHOTGUN) ? 0.15f : 0.02f;
+
+  for (int i = 0; i < g_state.numPlayers; i++) {
+    if (i == 0 && !shooter->isBot) continue; // skip self if player
+    if (shooter->isBot && &g_state.players[i] == shooter) continue;
+    Player* target = &g_state.players[i];
+    if (!target->alive) continue;
+
+    float dx = target->x - shooter->x;
+    float dy = target->y - shooter->y;
+    float dz = target->z - shooter->z;
+    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (dist > range) continue;
+
+    // Check aim
+    float dot = sinf(shooter->yaw) * dx + cosf(shooter->yaw) * dz;
+    if (dot < 0) continue;
+    float cross = fabsf(sinf(shooter->yaw) * dz - cosf(shooter->yaw) * dx);
+    if (cross > spread * dist + 1.5f) continue;
+
+    applyDamage(target, damage);
+    if (shooter->weapon == WEAPON_SHOTGUN) break; // shotgun hits one target
+  }
+}
+
+// ===== Build Logic =====
+static void playerBuild(Player* p) {
+  if (!p->alive) return;
+  int cost = 10;
+  int type = g_input.buildPiece + 1; // 1=wall, 2=floor, 3=ramp
+
+  if (type == BUILD_WALL && p->wood < cost) return;
+  if (type == BUILD_FLOOR && p->stone < cost) return;
+  if (type == BUILD_RAMP && p->metal < cost) return;
+
+  float dist = 5.0f;
+  float bx = p->x + sinf(p->yaw) * dist;
+  float bz = p->z + cosf(p->yaw) * dist;
+  int idx = gridIndex(bx, bz);
+  if (idx < 0 || idx >= GRID_DIM * GRID_DIM) return;
+  if (g_state.grid[idx] != 0) return;
+
+  if (type == BUILD_WALL) p->wood -= cost;
+  else if (type == BUILD_FLOOR) p->stone -= cost;
+  else p->metal -= cost;
+
+  g_state.grid[idx] = type;
+}
+
+// ===== Bot AI =====
+static void updateBot(Player* bot, float dt) {
+  if (!bot->alive) return;
+
+  // Find nearest target
+  float closestDist = 100000.0f;
+  int targetIdx = 0;
+  for (int i = 0; i < g_state.numPlayers; i++) {
+    if (!g_state.players[i].alive) continue;
+    if (&g_state.players[i] == bot) continue;
+    float dx = g_state.players[i].x - bot->x;
+    float dz = g_state.players[i].z - bot->z;
+    float d = dx * dx + dz * dz;
+    if (d < closestDist) {
+      closestDist = d;
+      targetIdx = i;
+    }
+  }
+  bot->botTarget = targetIdx;
+  Player* target = &g_state.players[targetIdx];
+
+  // Aim at target
+  float dx = target->x - bot->x;
+  float dz = target->z - bot->z;
+  bot->yaw = atan2f(dx, dz);
+  float dist = sqrtf(dx * dx + dz * dz);
+
+  // Movement AI
+  if (dist > 20.0f) {
+    bot->vx = sinf(bot->yaw) * 10.0f;
+    bot->vz = cosf(bot->yaw) * 10.0f;
+  } else if (dist > 10.0f) {
+    bot->botWanderAngle += dt * 3.0f;
+    float strafe = sinf(bot->botWanderAngle);
+    bot->vx = strafe * cosf(bot->yaw) * 7.0f;
+    bot->vz = -strafe * sinf(bot->yaw) * 7.0f;
+  } else {
+    bot->vx = 0;
+    bot->vz = 0;
+  }
+
+  // Gravity
+  if (!bot->onGround) bot->vy -= 30.0f * dt;
+  if (bot->y <= 0) {
+    bot->y = 0;
+    bot->vy = 0;
+    bot->onGround = true;
+  }
+
+  // Integrate position
+  bot->x += bot->vx * dt;
+  bot->y += bot->vy * dt;
+  bot->z += bot->vz * dt;
+
+  // World bounds
+  float halfMap = MAP_SIZE / 2.0f;
+  bot->x = clamp(bot->x, -halfMap + 1, halfMap - 1);
+  bot->z = clamp(bot->z, -halfMap + 1, halfMap - 1);
+
+  // Simple collision with grid
+  if (isBlocked(bot->x, bot->z)) {
+    bot->x -= bot->vx * dt;
+    bot->z -= bot->vz * dt;
+  }
+
+  // Shooting
+  bot->botShootCd -= dt;
+  if (dist < 50.0f && bot->botShootCd <= 0 && bot->ammo > 0) {
+    playerShoot(bot);
+    bot->botShootCd = 0.3f + ((float)(rand() % 100) / 200.0f);
+  }
+
+  // Building
+  bot->botBuildCd -= dt;
+  if (dist < 20.0f && bot->botBuildCd <= 0 && bot->wood >= 10) {
+    float bx = bot->x + sinf(bot->yaw) * 4.0f;
+    float bz = bot->z + cosf(bot->yaw) * 4.0f;
+    int idx = gridIndex(bx, bz);
+    if (idx >= 0 && idx < GRID_DIM * GRID_DIM && g_state.grid[idx] == 0) {
+      g_state.grid[idx] = BUILD_WALL;
+      bot->wood -= 10;
+    }
+    bot->botBuildCd = 2.0f + (float)(rand() % 2);
+  }
+}
+
+// ===== Storm Update =====
 static void updateStorm(float dt) {
-    if (g.stormShrinkTimer > 0) {
-        g.stormShrinkTimer -= dt;
-        if (g.stormShrinkTimer <= 0) {
-            // New target radius
-            g.stormTargetRadius = fmax(5.0f, g.stormRadius - 40.0f);
-        }
-    }
-    // Shrink radius toward target
-    if (g.stormRadius > g.stormTargetRadius) {
-        g.stormRadius -= 2.0f * dt;
-        if (g.stormRadius < g.stormTargetRadius) g.stormRadius = g.stormTargetRadius;
-    }
+  if (!g_state.stormActive) return;
 
-    // Damage players outside storm
-    for (int i = 0; i < g.numPlayers; i++) {
-        if (!g.players[i].alive) continue;
-        float dx = g.players[i].x - g.stormCenterX;
-        float dz = g.players[i].z - g.stormCenterZ;
-        if (sqrt(dx*dx+dz*dz) > g.stormRadius) {
-            g.players[i].health -= 5.0f * dt;
-            if (g.players[i].health <= 0) g.players[i].alive = false;
-        }
+  if (g_state.stormShrinkTimer > 0) {
+    g_state.stormShrinkTimer -= dt;
+    if (g_state.stormShrinkTimer <= 0) {
+      g_state.stormTargetRadius = fmaxf(10.0f, g_state.stormRadius - 50.0f);
     }
+  }
+
+  if (g_state.stormRadius > g_state.stormTargetRadius) {
+    g_state.stormRadius -= 2.5f * dt;
+    if (g_state.stormRadius < g_state.stormTargetRadius) {
+      g_state.stormRadius = g_state.stormTargetRadius;
+    }
+  }
+
+  // Damage players outside storm
+  for (int i = 0; i < g_state.numPlayers; i++) {
+    if (!g_state.players[i].alive) continue;
+    float dx = g_state.players[i].x - g_state.stormCenterX;
+    float dz = g_state.players[i].z - g_state.stormCenterZ;
+    if (sqrtf(dx * dx + dz * dz) > g_state.stormRadius) {
+      applyDamage(&g_state.players[i], 5.0f * dt);
+    }
+  }
 }
 
-// ---------- Main Update (called from JS) ----------
+// ===== Main Update =====
 extern "C" EMSCRIPTEN_KEEPALIVE
 void update(float dt) {
-    g_deltaTime = dt;
-    // Update player (index 0)
-    movePlayer(&g.players[0], dt);
-    // Input-based actions
-    if (g_input.shoot && g.players[0].alive) {
-        playerShoot(&g.players[0]);
-        g_input.shoot = false;
-    }
-    if (g_input.build && g.players[0].alive) {
-        build(&g.players[0]);
-        g_input.build = false;
-    }
-    if (g_input.switchWeapon) {
-        g.players[0].weapon = (g.players[0].weapon + 1) % 3;
-        g_input.switchWeapon = false;
-    }
+  if (!g_state.players[0].alive) return;
 
-    // Update bots
-    for (int i = 1; i < g.numPlayers; i++) {
-        updateBot(i, &g.players[i], &bots[i-1], dt);
-    }
-    updateStorm(dt);
+  // Update player 0 (human)
+  Player* p = &g_state.players[0];
+
+  // Apply mouse rotation
+  p->yaw += g_input.mouseDx;
+  p->pitch -= g_input.mouseDy;
+  p->pitch = clamp(p->pitch, -1.4f, 0.6f);
+  g_input.mouseDx = 0;
+  g_input.mouseDy = 0;
+
+  // Movement
+  float speed = 14.0f;
+  float moveX = 0, moveZ = 0;
+  if (g_input.forward > 0) { moveX += sinf(p->yaw); moveZ += cosf(p->yaw); }
+  if (g_input.backward > 0) { moveX -= sinf(p->yaw); moveZ -= cosf(p->yaw); }
+  if (g_input.left > 0) { moveX -= cosf(p->yaw); moveZ += sinf(p->yaw); }
+  if (g_input.right > 0) { moveX += cosf(p->yaw); moveZ -= sinf(p->yaw); }
+
+  float len = sqrtf(moveX * moveX + moveZ * moveZ);
+  if (len > 0) { moveX /= len; moveZ /= len; }
+
+  p->vx = moveX * speed;
+  p->vz = moveZ * speed;
+
+  // Gravity
+  if (!p->onGround) p->vy -= 30.0f * dt;
+  if (g_input.jump > 0 && p->onGround) {
+    p->vy = 15.0f;
+    p->onGround = false;
+  }
+
+  // Integrate position
+  p->x += p->vx * dt;
+  p->y += p->vy * dt;
+  p->z += p->vz * dt;
+
+  // Ground collision
+  if (p->y <= 0) {
+    p->y = 0;
+    p->vy = 0;
+    p->onGround = true;
+  }
+
+  // World bounds
+  float halfMap = MAP_SIZE / 2.0f;
+  p->x = clamp(p->x, -halfMap + 1, halfMap - 1);
+  p->z = clamp(p->z, -halfMap + 1, halfMap - 1);
+
+  // Grid collision
+  if (isBlocked(p->x, p->z)) {
+    p->x -= p->vx * dt;
+    p->z -= p->vz * dt;
+  }
+
+  // Actions
+  if (g_input.shoot > 0) {
+    playerShoot(p);
+    g_input.shoot = 0;
+  }
+  if (g_input.build > 0) {
+    playerBuild(p);
+    g_input.build = 0;
+  }
+  if (g_input.switchWeapon > 0) {
+    p->weapon = (p->weapon + 1) % 3;
+    g_input.switchWeapon = 0;
+  }
+
+  // Update bots
+  for (int i = 1; i < g_state.numPlayers; i++) {
+    updateBot(&g_state.players[i], dt);
+  }
+
+  // Update storm
+  updateStorm(dt);
 }
 
-// ---------- Getters for JS (positions) ----------
-extern "C" EMSCRIPTEN_KEEPALIVE
-int getNumPlayers() { return g.numPlayers; }
+// ===== Getters for JS =====
+extern "C" EMSCRIPTEN_KEEPALIVE int getNumPlayers() { return g_state.numPlayers; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getAliveCount() { return g_state.aliveCount; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerX(int i) { return g_state.players[i].x; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerY(int i) { return g_state.players[i].y; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerZ(int i) { return g_state.players[i].z; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerYaw(int i) { return g_state.players[i].yaw; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerPitch(int i) { return g_state.players[i].pitch; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerAlive(int i) { return g_state.players[i].alive ? 1 : 0; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerHealth(int i) { return g_state.players[i].health; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getPlayerShield(int i) { return g_state.players[i].shield; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerWeapon(int i) { return g_state.players[i].weapon; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerAmmo(int i) { return g_state.players[i].ammo; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerWood(int i) { return g_state.players[i].wood; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerStone(int i) { return g_state.players[i].stone; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerMetal(int i) { return g_state.players[i].metal; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerIsBot(int i) { return g_state.players[i].isBot ? 1 : 0; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getPlayerOnGround(int i) { return g_state.players[i].onGround ? 1 : 0; }
 
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerX(int idx) { return g.players[idx].x; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerY(int idx) { return g.players[idx].y; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerZ(int idx) { return g.players[idx].z; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerYaw(int idx) { return g.players[idx].yaw; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-int getPlayerAlive(int idx) { return g.players[idx].alive ? 1 : 0; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerHealth(int idx) { return g.players[idx].health; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getPlayerShield(int idx) { return g.players[idx].shield; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getGridDim() { return GRID_DIM; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getGridTile(int ix, int iz) {
+  if (ix < 0 || ix >= GRID_DIM || iz < 0 || iz >= GRID_DIM) return 0;
+  return g_state.grid[iz * GRID_DIM + ix];
+}
 
-extern "C" EMSCRIPTEN_KEEPALIVE
-int getGridDim() { return GRID_DIM; }
-extern "C" EMSCRIPTEN_KEEPALIVE
-int getGridTile(int ix, int iz) { return g.grid[iz][ix]; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getChestX(int i) { return g_state.chestX[i]; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getChestZ(int i) { return g_state.chestZ[i]; }
+extern "C" EMSCRIPTEN_KEEPALIVE int getChestOpened(int i) { return g_state.chestOpened[i] ? 1 : 0; }
 
-extern "C" EMSCRIPTEN_KEEPALIVE
-float getStormRadius() { return g.stormRadius; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getStormRadius() { return g_state.stormRadius; }
+extern "C" EMSCRIPTEN_KEEPALIVE float getStormShrinkTimer() { return g_state.stormShrinkTimer; }
