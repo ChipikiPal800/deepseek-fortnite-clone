@@ -111,3 +111,347 @@
 
   // Grid lines for reference
   const gridHelper = new THREE.GridHelper(300, 60, 0x335522, 0x224418);
+  gridHelper.position.y = 0;
+  scene.add(gridHelper);
+
+  // Player meshes
+  const playerMeshes = [];
+  const playerMaterials = [];
+  for (let i = 0; i < 16; i++) {
+    const isPlayer = i === 0;
+    const geo = new THREE.BoxGeometry(0.7, 1.8, 0.7);
+    const mat = new THREE.MeshLambertian({ color: isPlayer ? 0xffaa00 : 0xdd3333 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.visible = false;
+    scene.add(mesh);
+
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.3, 8, 8);
+    const headMat = new THREE.MeshLambertian({ color: isPlayer ? 0xffcc66 : 0xff6666 });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.15;
+    head.castShadow = true;
+    mesh.add(head);
+
+    // Gun
+    const gunGeo = new THREE.BoxGeometry(0.12, 0.12, 0.7);
+    const gunMat = new THREE.MeshLambertian({ color: 0x333333 });
+    const gun = new THREE.Mesh(gunGeo, gunMat);
+    gun.position.set(0.4, 0.4, 0.3);
+    gun.castShadow = true;
+    mesh.add(gun);
+
+    playerMeshes.push(mesh);
+    playerMaterials.push(mat);
+  }
+
+  // Structure meshes cache
+  const structureGroup = new THREE.Group();
+  scene.add(structureGroup);
+  const structureMeshes = new Map();
+
+  // Chest meshes
+  const chestMeshes = [];
+  const chestGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8);
+  const chestMat = new THREE.MeshLambertian({ color: 0xd4a840 });
+  const chestGoldMat = new THREE.MeshLambertian({ color: 0x888888 });
+  for (let i = 0; i < 20; i++) {
+    const chest = new THREE.Mesh(chestGeo, chestMat);
+    chest.castShadow = true;
+    chest.receiveShadow = true;
+    chest.visible = false;
+    scene.add(chest);
+    chestMeshes.push(chest);
+  }
+
+  // Storm cylinder
+  const stormGeo = new THREE.CylinderGeometry(200, 200, 400, 64);
+  const stormMat = new THREE.MeshBasicMaterial({
+    color: 0x9944ff,
+    transparent: true,
+    opacity: 0.25,
+    side: THREE.DoubleSide
+  });
+  const stormMesh = new THREE.Mesh(stormGeo, stormMat);
+  stormMesh.position.y = 200;
+  scene.add(stormMesh);
+
+  // ===== Input State =====
+  const inputState = {
+    forward: 0, backward: 0, left: 0, right: 0,
+    jump: 0, shoot: 0, build: 0, switchWeapon: 0,
+    mouseDx: 0, mouseDy: 0, buildPiece: 0
+  };
+
+  document.addEventListener('keydown', e => {
+    switch(e.code) {
+      case 'KeyW': inputState.forward = 1; break;
+      case 'KeyS': inputState.backward = 1; break;
+      case 'KeyA': inputState.left = 1; break;
+      case 'KeyD': inputState.right = 1; break;
+      case 'Space': inputState.jump = 1; e.preventDefault(); break;
+      case 'KeyR': inputState.switchWeapon = 1; break;
+      case 'Digit1': inputState.buildPiece = 0; break;
+      case 'Digit2': inputState.buildPiece = 1; break;
+      case 'Digit3': inputState.buildPiece = 2; break;
+    }
+  });
+  document.addEventListener('keyup', e => {
+    switch(e.code) {
+      case 'KeyW': inputState.forward = 0; break;
+      case 'KeyS': inputState.backward = 0; break;
+      case 'KeyA': inputState.left = 0; break;
+      case 'KeyD': inputState.right = 0; break;
+      case 'Space': inputState.jump = 0; break;
+      case 'KeyR': inputState.switchWeapon = 0; break;
+    }
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (e.button === 0) inputState.shoot = 1;
+    if (e.button === 2) { inputState.build = 1; e.preventDefault(); }
+  });
+  document.addEventListener('mouseup', e => {
+    if (e.button === 0) inputState.shoot = 0;
+    if (e.button === 2) { inputState.build = 0; e.preventDefault(); }
+  });
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  document.addEventListener('mousemove', e => {
+    if (document.pointerLockElement) {
+      inputState.mouseDx += e.movementX * 0.003;
+      inputState.mouseDy += e.movementY * 0.003;
+    }
+  });
+  document.body.addEventListener('click', () => {
+    if (!document.pointerLockElement) document.body.requestPointerLock();
+  });
+
+  // ===== Initialize Game =====
+  wasm.initGame();
+
+  // ===== UI Elements =====
+  const uiHpText = document.getElementById('hpt');
+  const uiHpFill = document.getElementById('hpf');
+  const uiShText = document.getElementById('sht');
+  const uiShFill = document.getElementById('shf');
+  const uiWeaponName = document.getElementById('wn');
+  const uiAmmo = document.getElementById('am');
+  const uiWood = document.getElementById('wd');
+  const uiStone = document.getElementById('sn');
+  const uiMetal = document.getElementById('ml');
+  const uiMsg = document.getElementById('msg');
+  const uiBuildInd = document.getElementById('bld-ind');
+  const mmCanvas = document.getElementById('mm');
+  const mmCtx = mmCanvas.getContext('2d');
+
+  const weaponNames = ['Pickaxe', 'Assault Rifle', 'Shotgun'];
+
+  function showMessage(text, duration = 2000) {
+    uiMsg.textContent = text;
+    uiMsg.style.opacity = '1';
+    setTimeout(() => { uiMsg.style.opacity = '0'; }, duration);
+  }
+
+  // ===== Structure Mesh Management =====
+  function updateStructureMeshes() {
+    const dim = wasm.getGridDim();
+    // Simple approach: rebuild all visible structures each frame
+    // For performance with WASM, we batch this
+    structureGroup.clear();
+    structureMeshes.clear();
+
+    const wallGeo = new THREE.BoxGeometry(2, 3, 2);
+    const floorGeo = new THREE.BoxGeometry(2, 0.3, 2);
+    const rampGeo = new THREE.ConeGeometry(1.2, 2, 4);
+
+    const matWall = new THREE.MeshLambertian({ color: 0x8B7355 });
+    const matFloor = new THREE.MeshLambertian({ color: 0x9B8B75 });
+    const matRamp = new THREE.MeshLambertian({ color: 0x6B5B45 });
+
+    const halfMap = 150;
+    for (let iz = 0; iz < dim; iz++) {
+      for (let ix = 0; ix < dim; ix++) {
+        const tile = wasm.getGridTile(ix, iz);
+        if (tile === 0) continue;
+
+        const x = (ix + 0.5) * 2 - halfMap;
+        const z = (iz + 0.5) * 2 - halfMap;
+        let mesh;
+
+        if (tile === 1) {
+          mesh = new THREE.Mesh(wallGeo, matWall);
+        } else if (tile === 2) {
+          const m = new THREE.Mesh(floorGeo, matFloor);
+          m.position.y = 0.15;
+          mesh = m;
+        } else {
+          const m = new THREE.Mesh(rampGeo, matRamp);
+          m.position.y = 0.5;
+          mesh = m;
+        }
+
+        if (tile !== 2) mesh.position.y = 1.5;
+        mesh.position.x = x;
+        mesh.position.z = z;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        structureGroup.add(mesh);
+        structureMeshes.set(`${ix},${iz}`, mesh);
+      }
+    }
+  }
+
+  // ===== Game Loop =====
+  let prevTime = performance.now();
+  let structureUpdateCounter = 0;
+
+  function gameLoop() {
+    requestAnimationFrame(gameLoop);
+
+    const now = performance.now();
+    const dt = Math.min((now - prevTime) / 1000, 0.1);
+    prevTime = now;
+
+    // Send input to WASM
+    wasm.setInput(
+      inputState.forward, inputState.backward, inputState.left, inputState.right,
+      inputState.jump, inputState.shoot, inputState.build, inputState.switchWeapon,
+      inputState.mouseDx, inputState.mouseDy, inputState.buildPiece
+    );
+    inputState.mouseDx = 0;
+    inputState.mouseDy = 0;
+
+    // Reset single-frame inputs
+    inputState.shoot = 0;
+    inputState.build = 0;
+    inputState.switchWeapon = 0;
+
+    // Update game
+    wasm.update(dt);
+
+    // Update player positions
+    const numPlayers = wasm.getNumPlayers();
+    for (let i = 0; i < numPlayers; i++) {
+      const mesh = playerMeshes[i];
+      if (!mesh) continue;
+      const alive = wasm.getPlayerAlive(i);
+      mesh.visible = alive === 1;
+      if (alive) {
+        mesh.position.set(wasm.getPlayerX(i), wasm.getPlayerY(i), wasm.getPlayerZ(i));
+        mesh.rotation.y = wasm.getPlayerYaw(i);
+      }
+    }
+
+    // Update chests
+    for (let i = 0; i < 20; i++) {
+      const chest = chestMeshes[i];
+      const opened = wasm.getChestOpened(i);
+      chest.visible = opened === 0;
+      if (!opened) {
+        chest.position.set(wasm.getChestX(i), 0.3, wasm.getChestZ(i));
+        chest.material = chestMat;
+      }
+    }
+
+    // Update structures periodically
+    structureUpdateCounter++;
+    if (structureUpdateCounter > 30) {
+      updateStructureMeshes();
+      structureUpdateCounter = 0;
+    }
+
+    // Update storm mesh
+    const stormRadius = wasm.getStormRadius();
+    stormMesh.scale.set(stormRadius / 200, 1, stormRadius / 200);
+
+    // Camera follow player
+    const px = wasm.getPlayerX(0);
+    const py = wasm.getPlayerY(0);
+    const pz = wasm.getPlayerZ(0);
+    const pyaw = wasm.getPlayerYaw(0);
+    const ppitch = wasm.getPlayerPitch(0);
+
+    const camDist = 5;
+    const camHeight = 2.5;
+    const camX = px - Math.sin(pyaw) * camDist * Math.cos(ppitch);
+    const camY = py + camHeight + Math.sin(ppitch) * camDist;
+    const camZ = pz - Math.cos(pyaw) * camDist * Math.cos(ppitch);
+
+    camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.2);
+    camera.lookAt(px, py + 1.2, pz);
+
+    // Update UI
+    const hp = Math.max(0, Math.round(wasm.getPlayerHealth(0)));
+    const sh = Math.max(0, Math.round(wasm.getPlayerShield(0)));
+    uiHpText.textContent = hp;
+    uiHpFill.style.width = hp + '%';
+    uiShText.textContent = sh;
+    uiShFill.style.width = sh + '%';
+
+    const weapon = wasm.getPlayerWeapon(0);
+    const ammo = wasm.getPlayerAmmo(0);
+    uiWeaponName.textContent = weaponNames[weapon] || 'Pickaxe';
+    uiAmmo.textContent = weapon === 0 ? '--' : ammo;
+    uiWood.textContent = wasm.getPlayerWood(0);
+    uiStone.textContent = wasm.getPlayerStone(0);
+    uiMetal.textContent = wasm.getPlayerMetal(0);
+
+    // Build indicator
+    const buildMode = inputState.buildPiece !== undefined;
+    uiBuildInd.style.display = buildMode ? 'block' : 'none';
+
+    // Check win/lose
+    if (wasm.getPlayerAlive(0) === 0) {
+      showMessage('ELIMINATED', 999999);
+    } else if (wasm.getAliveCount() <= 1) {
+      showMessage('VICTORY ROYALE!', 999999);
+    }
+
+    // Update minimap
+    mmCtx.clearRect(0, 0, 170, 170);
+    // Background
+    mmCtx.fillStyle = '#1a1a2e';
+    mmCtx.beginPath();
+    mmCtx.arc(85, 85, 83, 0, Math.PI * 2);
+    mmCtx.fill();
+
+    // Storm circle
+    mmCtx.strokeStyle = '#9944ff';
+    mmCtx.lineWidth = 2;
+    mmCtx.beginPath();
+    mmCtx.arc(85, 85, (stormRadius / 200) * 80, 0, Math.PI * 2);
+    mmCtx.stroke();
+
+    // Players on minimap
+    for (let i = 0; i < numPlayers; i++) {
+      if (!wasm.getPlayerAlive(i)) continue;
+      const mx = (wasm.getPlayerX(i) / 150) * 80 + 85;
+      const mz = (wasm.getPlayerZ(i) / 150) * 80 + 85;
+      mmCtx.fillStyle = i === 0 ? '#ffaa00' : '#ff4444';
+      mmCtx.beginPath();
+      mmCtx.arc(mx, mz, i === 0 ? 3 : 2, 0, Math.PI * 2);
+      mmCtx.fill();
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  // Initial structure build
+  updateStructureMeshes();
+  showMessage('DROP FROM THE BATTLE BUS!', 3000);
+
+  // Start
+  gameLoop();
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+</script>
+</body>
+</html>
